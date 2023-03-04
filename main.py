@@ -121,7 +121,7 @@ def sample_timestep(betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posteri
         x - beta_t * model(x, t) / sqrt_one_minus_alphas_bar_t
     )
     posterior_variance_t = get_index(posterior_variance, t)
-    
+
     if t == 0:
         return model_mean # No added noise if we are in the last step
     else:
@@ -215,10 +215,11 @@ if __name__ == "__main__":
                 print(f"Error: weights not found in {path}")
                 exit()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.L_RATE)
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.LR)
+ 
     assert cfg.SAVE_STEP < cfg.EPOCHS
-    writer = SummaryWriter()
+    comment = f'batch={cfg.BATCH_SIZE}_lr={cfg.LR}_bstart={cfg.BETA_START}_bend={cfg.BETA_END}_T={cfg.T}'
+    writer = SummaryWriter(comment=comment)
     loss_epoch = None
     with tqdm(range(epoch_start, cfg.EPOCHS), unit="epoch", leave=False, colour="GREEN") as tqdm_epoch:
         for epoch in tqdm_epoch:
