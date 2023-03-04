@@ -41,7 +41,6 @@ class SinusoidalTimeEmbedding(nn.Module):
     """ ref: https://raw.githubusercontent.com/hojonathanho/diffusion/master/diffusion_tf/nn.py """
     def __init__(self, emb_dim, device):
         super().__init__()
-        self.T = cfg.T
         assert  emb_dim % 2 == 0
         half_dim = emb_dim // 2
         emb = math.log(10000) / (half_dim - 1)
@@ -49,7 +48,6 @@ class SinusoidalTimeEmbedding(nn.Module):
 
 
     def forward(self, time_steps):
-      time_steps = (time_steps * self.T).to(torch.int64) # Convert times from [0.,1.] to [0,T]
       emb = self.emb[:]
       emb = time_steps[:, None] * emb[None, :]
       emb = torch.concat([torch.sin(emb), torch.cos(emb)], dim=-1)
@@ -89,7 +87,6 @@ class UNet(nn.Module):
 
 
 def get_index(vals, t):
-    t = (t * cfg.T).to(torch.int64) # Convert times from [0.,1.] to [0,T]
     vals_t = vals.gather(-1, t)
     if len(t) == 1: # Single image
         return vals_t.reshape(1, 1, 1) # C,H,W
@@ -116,16 +113,16 @@ def sample_timestep(betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posteri
     """
         Uses the trained model to predict the noise in the image and returns the denoised image. 
     """
-    betas_t = get_index(betas, t)
+    beta_t = get_index(betas, t)
     sqrt_one_minus_alphas_bar_t = get_index(sqrt_one_minus_alphas_bar, t)
     sqrt_recip_alphas_t = get_index(sqrt_recip_alphas, t)
     # Call model (current image - noise prediction)
     model_mean = sqrt_recip_alphas_t * (
-        x - betas_t * model(x, t) / sqrt_one_minus_alphas_bar_t
+        x - beta_t * model(x, t) / sqrt_one_minus_alphas_bar_t
     )
     posterior_variance_t = get_index(posterior_variance, t)
     
-    if t == 0.:
+    if t == 0:
         return model_mean # No added noise if we are in the last step
     else:
         noise = torch.randn_like(x)
@@ -134,22 +131,25 @@ def sample_timestep(betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posteri
 
 @torch.no_grad()
 def sample_image(e, betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posterior_variance, device):
-    """ Sample / Generate new image from noise """
+    """
+        Sample / generate new image from noise
+    """
     im_size = cfg.RESIZE[0]
     x = torch.randn((1, 3, im_size, im_size), device=device) # Image made of just random noise
-    num_images = cfg.N_IM
-    pic = Image.new('RGB', (im_size*num_images, im_size))
-    step = 1. / cfg.T
-    step_int = int(cfg.T / num_images)
-    t = torch.tensor([1.]).to(device)
-    x_offset = 0
+    n_images = cfg.N_IM
+    step_int = int(cfg.T / n_images)
+    # Create pic, a stack of images from pure noise (right) to the generated image (left)
+    width_total = im_size * n_images
+    x_offset = width_total - im_size
+    pic = Image.new('RGB', (width_total, im_size)) # The n_images are stacked together horizontally
     for i in range(0, cfg.T)[::-1]:
-        t -= step # t goes from ]1., 0.], representing the steps from ]T, T-1, ..., 0]
+        t = torch.tensor([i], device=device, dtype=torch.int64)
         x = sample_timestep(betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posterior_variance, x, t)
         if i % step_int == 0:
-            im = transforms_reversed(x[0])
+            im = transforms_reversed(x[0]) # Here, we have a batch of 1, so we can use [0] to "de-batch"
             pic.paste(im, (x_offset, 0))
-            x_offset += im_size
+            x_offset -= im_size
+    # Save the picture
     out_path = os.path.join(cfg.OUT_DIR, f"epoch_{e}.jpg")
     pic.save(out_path)
 
@@ -177,12 +177,12 @@ transforms_reversed = trns.Compose(
 
 # Use CUDA if available
 device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using {device} device")
+print(f"\tUsing {device} device")
 
 if __name__ == "__main__":
     """ Load data """
     dataset = CatsDataset(dataset=cfg.DATA, im_format=cfg.DATA_FORMAT, transforms=transforms_custom)
-    dataloader = DataLoader(dataset, batch_size=cfg.BATCH_SIZE, shuffle=True)
+    train_loader = DataLoader(dataset, batch_size=cfg.BATCH_SIZE, shuffle=True)
     """ Forward diffusion """
     T = cfg.T
     betas = torch.linspace(cfg.BETA_START, cfg.BETA_END, T).to(device)
@@ -215,22 +215,34 @@ if __name__ == "__main__":
                 print(f"Error: weights not found in {path}")
                 exit()
 
-    writer = SummaryWriter()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.L_RATE)
-    epochs = tqdm(range(epoch_start, cfg.EPOCHS), desc="Epochs")
 
-    for epoch in epochs:
-        for batch_i, batch in enumerate(dataloader):
-            optimizer.zero_grad()
-            t = torch.rand((len(batch),), device=device) # sometimes len(batch) < cfg.BATCH_SIZE
-            loss = loss_fn(sqrt_alphas_bar, sqrt_one_minus_alphas_bar, model, batch, t, device)
-            loss.backward()
-            optimizer.step()
-        writer.add_scalar("Loss/train", loss, epoch + 1)
-        if epoch > 0 and (epoch + 1) % 5 == 0:
-            out_path = os.path.join(cfg.OUT_WEIGHTS, f"model_epoch_{epoch}.pth")
-            torch.save(model.state_dict(), out_path)
-        """ Sampling """
-        sample_image(epoch, betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posterior_variance, device)
+    assert cfg.SAVE_STEP < cfg.EPOCHS
+    writer = SummaryWriter()
+    loss_epoch = None
+    with tqdm(range(epoch_start, cfg.EPOCHS), unit="epoch", leave=False, colour="GREEN") as tqdm_epoch:
+        for epoch in tqdm_epoch:
+            tqdm_epoch.set_description(f"Epoch [{epoch}/{cfg.EPOCHS}[ ")
+            if loss_epoch:
+                 tqdm_epoch.set_postfix(loss=loss_epoch) # report on tqdm the previous epoch loss
+            loss_batches = []
+            with tqdm(train_loader, unit="batch", leave=False, colour="CYAN") as tqdm_batches:
+                for batch_i, batch in enumerate(tqdm_batches):
+                    tqdm_batches.set_description(f"Batch [{batch_i+1}/{len(train_loader)}[ ")
+                    optimizer.zero_grad()
+                    t = torch.randint(0, cfg.T, (len(batch),), device=device, dtype=torch.int64) # sometimes len(batch) < cfg.BATCH_SIZE
+                    loss = loss_fn(sqrt_alphas_bar, sqrt_one_minus_alphas_bar, model, batch, t, device)
+                    loss.backward()
+                    optimizer.step()
+                    tqdm_batches.set_postfix(loss=loss.item()) # report on tqdm the batch loss
+                    loss_batches.append(loss.item())
+                loss_batches = np.array(loss_batches) # Convert to numpy array
+                loss_epoch = np.average(loss_batches) # Measure epoch loss as the average of all batches
+                writer.add_scalar("Loss/train", loss_epoch, epoch + 1) # report epoch loss on tensorboard
+                if (epoch + 1) % cfg.SAVE_STEP == 0:
+                    out_path = os.path.join(cfg.OUT_WEIGHTS, f"model_epoch_{epoch + 1}.pth")
+                    torch.save(model.state_dict(), out_path)
+                """ Sampling """
+                sample_image(epoch + 1, betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posterior_variance, device)
     writer.flush()
     writer.close()
