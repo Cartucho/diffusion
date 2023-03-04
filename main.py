@@ -160,16 +160,16 @@ transforms_custom = trns.Compose(
         trns.RandomHorizontalFlip(),
         trns.Resize(size=cfg.RESIZE),
         trns.ToTensor(),  # Go from values [0, 255] into [0, 1]
-        trns.Lambda(lambda t: (t * 2.) - 1) # Go from values [0, 1] into [-1, 1]
+        trns.Lambda(lambda x: (x * 2.) - 1) # Go from values [0, 1] into [-1, 1]
     ]
 )
 """ From tensor to PIL image """
 transforms_reversed = trns.Compose(
     [
-        trns.Lambda(lambda t: (t + 1.) / 2), # Go from values [-1, 1] into [0, 1]
-        trns.Lambda(lambda t: t.permute(1, 2, 0)), # Re-order channels C,H,W -> H,W,C 
-        trns.Lambda(lambda t: t * 255.), # Go from values [0, 1] into [0, 255.]
-        trns.Lambda(lambda t: t.cpu().numpy().astype(np.uint8)),
+        trns.Lambda(lambda x: (x + 1.) / 2), # Go from values [-1, 1] into [0, 1]
+        trns.Lambda(lambda x: x.permute(1, 2, 0)), # Re-order channels C,H,W -> H,W,C
+        trns.Lambda(lambda x: x * 255.), # Go from values [0, 1] into [0, 255.]
+        trns.Lambda(lambda x: x.cpu().numpy().astype(np.uint8)),
         trns.ToPILImage()
     ]
 )
