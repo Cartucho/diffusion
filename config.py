@@ -14,11 +14,13 @@ BETA_END = 0.02
 DTYPE = torch.float32
 BATCH_SIZE = 200
 EMBEDDING_DIM = 32
-EPOCHS = 500
 L_RATE = 0.001
+EPOCHS = 500
+SAVE_STEP = 10 # Needs to be smaller than the number of epochs
 OUT_WEIGHTS = "output_weights"
-LOAD_WEIGHT = False
+LOAD_WEIGHTS = False
 WEIGHT_TO_LOAD = "model_epoch_15.pth"
 
 """ Sampling """
 OUT_DIR = "output_samples"
+N_IM = 10

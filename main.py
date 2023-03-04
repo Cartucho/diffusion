@@ -137,7 +137,7 @@ def sample_image(e, betas, sqrt_one_minus_alphas_bar, sqrt_recip_alphas, posteri
     """ Sample / Generate new image from noise """
     im_size = cfg.RESIZE[0]
     x = torch.randn((1, 3, im_size, im_size), device=device) # Image made of just random noise
-    num_images = 10
+    num_images = cfg.N_IM
     pic = Image.new('RGB', (im_size*num_images, im_size))
     step = 1. / cfg.T
     step_int = int(cfg.T / num_images)
@@ -205,7 +205,7 @@ if __name__ == "__main__":
     if not os.path.isdir(cfg.OUT_WEIGHTS):
         os.mkdir(cfg.OUT_WEIGHTS)
     else:
-        if cfg.LOAD_WEIGHT:
+        if cfg.LOAD_WEIGHTS:
             path = os.path.join(cfg.OUT_WEIGHTS, cfg.WEIGHT_TO_LOAD)
             if os.path.isfile(path):
                 print(f"Loading weights:{path}")
